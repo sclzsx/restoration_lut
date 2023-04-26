@@ -2,15 +2,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class SRNet(nn.Module):
-    def __init__(self):
+    def __init__(self, in_channels, n_features):
         super(SRNet, self).__init__()
 
-        self.conv1 = nn.Conv2d(3, 64, [2, 2], stride=1, padding=0, dilation=1)
-        self.conv2 = nn.Conv2d(64, 64, 1, stride=1, padding=0, dilation=1)
-        self.conv3 = nn.Conv2d(64, 64, 1, stride=1, padding=0, dilation=1)
-        self.conv4 = nn.Conv2d(64, 64, 1, stride=1, padding=0, dilation=1)
-        self.conv5 = nn.Conv2d(64, 64, 1, stride=1, padding=0, dilation=1)
-        self.conv6 = nn.Conv2d(64, 3, 1, stride=1, padding=0, dilation=1)
+        self.conv1 = nn.Conv2d(in_channels, n_features, [2, 2], stride=1, padding=0, dilation=1)
+        self.conv2 = nn.Conv2d(n_features, n_features, 1, stride=1, padding=0, dilation=1)
+        self.conv3 = nn.Conv2d(n_features, n_features, 1, stride=1, padding=0, dilation=1)
+        self.conv4 = nn.Conv2d(n_features, n_features, 1, stride=1, padding=0, dilation=1)
+        self.conv5 = nn.Conv2d(n_features, n_features, 1, stride=1, padding=0, dilation=1)
+        self.conv6 = nn.Conv2d(n_features, in_channels, 1, stride=1, padding=0, dilation=1)
 
         # Init weights
         for m in self.modules():

@@ -4,7 +4,7 @@ import os
 import shutil
 import torch.nn.functional as F
 from dataset import REC_DATASET, extract_path_pairs
-from model import SRNet
+from model3 import UNet
 import numpy as np
 import cv2
 from torch.utils.tensorboard import SummaryWriter
@@ -12,6 +12,7 @@ import sys
 from skimage.metrics import mean_squared_error as compare_mse
 from skimage.metrics import peak_signal_noise_ratio as compare_psnr
 from skimage.metrics import structural_similarity as compare_ssim
+
 
 def batch_PSNR(img, imclean, data_range):
     Img = img.data.cpu().numpy().astype(np.float32)
@@ -21,24 +22,49 @@ def batch_PSNR(img, imclean, data_range):
         PSNR += compare_psnr(Iclean[i, :, :, :], Img[i, :, :, :], data_range=data_range)
     return (PSNR / Img.shape[0])
 
-end_epoch = 100
-batch_size = 64
-patch_size = 64
-patch_stride = 32
+
+def model_rot4_invrot4(source, model):
+    source1 = F.pad(source, (0,1,0,1), mode='reflect')
+    source2 = F.pad(source, (0,1,0,1), mode='reflect')
+    source3 = F.pad(source, (0,1,0,1), mode='reflect')
+    source4 = F.pad(source, (0,1,0,1), mode='reflect')
+
+    source2 = torch.rot90(source2, 1, [2,3])
+    source3 = torch.rot90(source3, 2, [2,3])
+    source4 = torch.rot90(source4, 3, [2,3])
+
+    source1 = model(source1)
+    source2 = model(source2)
+    source3 = model(source3)
+    source4 = model(source4)
+
+    source2 = torch.rot90(source2, 3, [2,3])
+    source3 = torch.rot90(source3, 2, [2,3])
+    source4 = torch.rot90(source4, 1, [2,3])
+
+    source_out = (source1 + source2 + source3 + source4) / 4
+    return source_out
+    
+
+end_epoch = 10
+batch_size = 16
+patch_size = 256
+patch_stride = patch_size // 2
 lr = 1e-3
 resume_path = ''
-save_dir = './results'
+save_dir = './resultsUNet'
 train_image_num = 1000
 milestones = [i * end_epoch // 10 for i in range(4, 10, 2)]
-TRAIN_SOURCE_PATHS_TXT = '/data/datasets/DEBLUR_DIV2K/DIV2K_valid_HR_blur.txt'
-TRAIN_TARGET_PATHS_TXT = '/data/datasets/DEBLUR_DIV2K/DIV2K_valid_HR_hr.txt'
+TRAIN_SOURCE_PATHS_TXT = '/data/datasets/DEBLUR_DIV2K_NONOISE/DIV2K_train_HR_blur.txt'
+TRAIN_TARGET_PATHS_TXT = '/data/datasets/DEBLUR_DIV2K_NONOISE/DIV2K_train_HR_hr.txt'
+
 
 patch_size_test = 0
 patch_stride_test = 0
-test_image_num = 10
+test_image_num = 20
 save_vis = True
-TEST_SOURCE_PATHS_TXT = '/data/datasets/DEBLUR_SMALL/Kodak24_blur.txt'
-TEST_TARGET_PATHS_TXT = '/data/datasets/DEBLUR_SMALL/Kodak24_hr.txt'
+TEST_SOURCE_PATHS_TXT = '/data/datasets/DEBLUR_DIV2K_NONOISE/DIV2K_valid_HR_blur.txt'
+TEST_TARGET_PATHS_TXT = '/data/datasets/DEBLUR_DIV2K_NONOISE/DIV2K_valid_HR_hr.txt'
 
 
 if not os.path.exists(save_dir):
@@ -47,18 +73,20 @@ if not os.path.exists(save_dir):
 source_paths_train, target_paths_train = extract_path_pairs(TRAIN_SOURCE_PATHS_TXT, TRAIN_TARGET_PATHS_TXT, shuffle=True)
 source_paths_test, target_paths_test = extract_path_pairs(TEST_SOURCE_PATHS_TXT, TEST_TARGET_PATHS_TXT, shuffle=True)
 
-if train_image_num is not None:
+if train_image_num is not None and train_image_num < len(source_paths_train):
     source_paths_train = source_paths_train[:train_image_num]
     target_paths_train = target_paths_train[:train_image_num]
 
-if test_image_num is not None:
+if test_image_num is not None and test_image_num < len(source_paths_test):
     source_paths_test = source_paths_test[:test_image_num]
     target_paths_test = target_paths_test[:test_image_num]
 
 dataset_train = REC_DATASET(source_paths_train, target_paths_train, patch_size, patch_stride)
 dataset_test = REC_DATASET(source_paths_test, target_paths_test, patch_size_test, patch_stride_test)
 
-model = SRNet()
+# model = SRNet(in_channels=3, n_features=64)
+model = UNet(in_ch=3, out_ch=3)
+
 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones)
 
@@ -93,37 +121,21 @@ for epoch in range(start_epoch, end_epoch + 1):
         source = source.cuda()
         target = target.cuda()
 
-        source1 = F.pad(source, (0,1,0,1), mode='reflect')
-        source2 = F.pad(source, (0,1,0,1), mode='reflect')
-        source3 = F.pad(source, (0,1,0,1), mode='reflect')
-        source4 = F.pad(source, (0,1,0,1), mode='reflect')
-
-        source2 = torch.rot90(source2, 1, [2,3])
-        source3 = torch.rot90(source3, 2, [2,3])
-        source4 = torch.rot90(source4, 3, [2,3])
-
-        source1 = model(source1)
-        source2 = model(source2)
-        source3 = model(source3)
-        source4 = model(source4)
-
-        source2 = torch.rot90(source2, 3, [2,3])
-        source3 = torch.rot90(source3, 2, [2,3])
-        source4 = torch.rot90(source4, 1, [2,3])
-
-        source = (source1 + source2 + source3 + source4) / 4
-        source = torch.clamp(source, 0, 1)
-
-        loss = criterion(source, target)
+        # source_out = model_rot4_invrot4(source, model)
+        source_out = model(source)
+    
+        source_out = torch.clamp(source_out, 0, 1)
+        
+        loss = criterion(source_out, target)
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        if i % 10 == 0:
-            psnr = batch_PSNR(source, target, 1.0)
-
-            print('Epoch:{}, Iter:[{}/{}], loss:{}, psnr:{}'.format(epoch, i + 1, iter_n_per_epoch, loss.item(), psnr))
+        if i % 50 == 0:
+            psnr_ori = batch_PSNR(source, target, 1.0)
+            psnr_out = batch_PSNR(source_out, target, 1.0)
+            print('Epoch:{}, Iter:[{}/{}], loss:{}, psnr_ori:{}, psnr_out:{}'.format(epoch, i + 1, iter_n_per_epoch, loss.item(), psnr_ori, psnr_out))
 
         writer.add_scalar('train_loss_iter', loss.item(), i + 1)
         train_loss += loss.item()
@@ -135,55 +147,39 @@ for epoch in range(start_epoch, end_epoch + 1):
     model.eval()
     test_loss = 0
     test_psnr = 0
+    save_img_dir = save_dir + '/save_vis'
+    if os.path.exists(save_img_dir):
+        shutil.rmtree(save_img_dir)
+    os.makedirs(save_img_dir)
     with torch.no_grad():
         for i, (source, target) in enumerate(dataset_test):
             source = source.unsqueeze(0).cuda()
             target = target.unsqueeze(0).cuda()
 
-            source1 = F.pad(source, (0,1,0,1), mode='reflect')
-            source2 = F.pad(source, (0,1,0,1), mode='reflect')
-            source3 = F.pad(source, (0,1,0,1), mode='reflect')
-            source4 = F.pad(source, (0,1,0,1), mode='reflect')
-            # print('pad', source1.shape,source2.shape,source3.shape,source4.shape)
+            # source_out = model_rot4_invrot4(source, model)
+            source_out = model(source)
 
-            source2 = torch.rot90(source2, 1, [2,3])
-            source3 = torch.rot90(source3, 2, [2,3])
-            source4 = torch.rot90(source4, 3, [2,3])
-            # print('rot', source1.shape,source2.shape,source3.shape,source4.shape)
-
-            source1 = model(source1)
-            source2 = model(source2)
-            source3 = model(source3)
-            source4 = model(source4)
-            # print('pred', source1.shape,source2.shape,source3.shape,source4.shape)
-
-            source2 = torch.rot90(source2, 3, [2,3])
-            source3 = torch.rot90(source3, 2, [2,3])
-            source4 = torch.rot90(source4, 1, [2,3])
-            # print('rot back', source1.shape,source2.shape,source3.shape,source4.shape)
-
-            source = (source1 + source2 + source3 + source4) / 4
-            source = torch.clamp(source, 0, 1)
-            # print('out tensor', source.shape, target.shape)
+            source_out = torch.clamp(source_out, 0, 1)
 
             test_loss += criterion(source, target).item()
 
-            psnr = batch_PSNR(source, target, 1.0)
-            # print('psnr:', psnr)
+            psnr_ori = batch_PSNR(source, target, 1.0)
+            psnr_out = batch_PSNR(source_out, target, 1.0)
+            print('psnr_ori:{}, psnr_out:{}'.format(psnr_ori, psnr_out))
             
-            source = np.array(source.squeeze(0).permute(1, 2, 0).cpu())
-            target = np.array(target.squeeze(0).permute(1, 2, 0).cpu())
-            # print('out np', source.shape, target.shape)
-
-            test_psnr += psnr
+            test_psnr += psnr_out
 
             if save_vis:
-                source = (source * 255).astype('uint8')
+                source_ori = np.array(source.squeeze(0).permute(1, 2, 0).cpu())
+                source_out = np.array(source_out.squeeze(0).permute(1, 2, 0).cpu())
+                target = np.array(target.squeeze(0).permute(1, 2, 0).cpu())
+
+                source_ori = (source_ori * 255).astype('uint8')
+                source_out = (source_out * 255).astype('uint8')
                 target = (target * 255).astype('uint8')
-                save_img_dir = save_dir + '/save_vis'
-                if not os.path.exists(save_img_dir):
-                    os.makedirs(save_img_dir)
-                cv2.imwrite(save_img_dir + '/' + str(i) + '_source.jpg', source)
+
+                cv2.imwrite(save_img_dir + '/' + str(i) + '_source_' + str(psnr_ori) + '.jpg', source_ori)
+                cv2.imwrite(save_img_dir + '/' + str(i) + '_restored_' + str(psnr_out) + '.jpg', source_out)
                 cv2.imwrite(save_img_dir + '/' + str(i) + '_target.jpg', target)
 
         test_loss = test_loss / n_test_set

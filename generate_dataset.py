@@ -76,7 +76,7 @@ def save_file_paths(data_root):
                 f.write(gt_path)
                 f.write('\n')
 
-def generate_dataset_deblur(data_root, save_root, crop_size, stimu_num):
+def generate_dataset_deblur(data_root, save_root, crop_size, stimu_num, add_noise=True):
     if os.path.exists(save_root):
         shutil.rmtree(save_root)
         
@@ -92,9 +92,16 @@ def generate_dataset_deblur(data_root, save_root, crop_size, stimu_num):
         hr_name = path.name[:-4]
 
         hr = cv2.imread(str(path))
+
+        H, W, _  = hr.shape
+        if H < 256 or W < 256:
+            continue
+
         if crop_size is not None:
-            H, W, _  = hr.shape
+            if H < crop_size or W < crop_size:
+                continue
             hr = hr[(H - crop_size) // 2:(H - crop_size) // 2 + crop_size, (W - crop_size) // 2:(W - crop_size) // 2 + crop_size, :]
+        
         hr = hr / 255.0
 
         gray = (hr[:,:,0] + hr[:,:,1] + hr[:,:,2]) / 3
@@ -108,19 +115,23 @@ def generate_dataset_deblur(data_root, save_root, crop_size, stimu_num):
         cv2.imwrite(save_dir + '/' + hr_name + '_hr.png', (hr * 255).astype('uint8'))
 
         for _ in range(stimu_num):
-            k = np.random.choice([3, 5])
+            # k = np.random.choice([3, 5])
+            k = 3
 
-            s = np.random.randint(1, 30) / 10                           # sigma0    [0.1, 3.0]
-            r = np.random.randint(1, 10) / 10                           # rho       [0.1, 1.0]
+            s = np.random.randint(3, 15) / 10                           # sigma0    [0.1, 3.0]
+            r = np.random.randint(3, 10) / 10                           # rho       [0.1, 1.0]
             t = np.round(np.random.randint(0, 180) / 180 * np.pi, 2)    # theta     [0.0, 3.14]
+            
             v = np.random.randint(50, 500) / 1000000                    # var       [0.000001, 0.0005]
             n = np.round(v ** 0.5, 3)
 
             kernel = generate_kernel(s, r, t, k)
 
             blur = cv2.filter2D(hr, -1, kernel)
-            
-            blur = add_gasuss_noise_float(blur, mean=0, std=n)
+            blur = np.clip(blur, 0, 1.0)
+
+            if add_noise:
+                blur = add_gasuss_noise_float(blur, mean=0, std=n)
 
             blur_name = hr_name + '_k' + str(k) + '_s' + str(s) + '_r' + str(r) + '_t' + str(t) + '_n' + str(n)
             # print(blur_name)
@@ -148,8 +159,12 @@ def generate_dataset_sharpen(data_root, save_root, crop_size):
         hr_name = path.name[:-4]
 
         hr = cv2.imread(str(path))
+
+        H, W, _  = hr.shape
+        if H < 256 or W < 256:
+            continue
+
         if crop_size is not None:
-            H, W, _  = hr.shape
             hr = hr[(H - crop_size) // 2:(H - crop_size) // 2 + crop_size, (W - crop_size) // 2:(W - crop_size) // 2 + crop_size, :]
         hr = hr / 255.0
 
@@ -194,9 +209,13 @@ if __name__ =='__main__':
     # crop_size = None
     # generate_dataset_deblur(data_root, save_root, crop_size, stimu_num)
 
-    data_root = '/data/datasets/SMALL'
-    save_root = '/data/datasets/SHARPEN_SMALL'
-    crop_size = None
-    generate_dataset_sharpen(data_root, save_root, crop_size)
+    # data_root = '/data/datasets/SMALL'
+    # save_root = '/data/datasets/SHARPEN_SMALL'
+    # crop_size = None
+    # generate_dataset_sharpen(data_root, save_root, crop_size)
 
-    
+    data_root = '/data/datasets/DIV2K'
+    save_root = '/data/datasets/DEBLUR_DIV2K_NONOISE'
+    stimu_num = 5
+    crop_size = 1024
+    generate_dataset_deblur(data_root, save_root, crop_size, stimu_num, add_noise=False)
