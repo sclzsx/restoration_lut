@@ -23,7 +23,7 @@ def batch_PSNR(img, imclean, data_range):
     return (PSNR / Img.shape[0])
 
 
-def model_rot4_invrot4(source, model):
+def self_ensemble_rot4(source, model):
     source1 = F.pad(source, (0,1,0,1), mode='reflect')
     source2 = F.pad(source, (0,1,0,1), mode='reflect')
     source3 = F.pad(source, (0,1,0,1), mode='reflect')
@@ -46,32 +46,37 @@ def model_rot4_invrot4(source, model):
     return source_out
     
 
-end_epoch = 10
+end_epoch = 50
 batch_size = 16
 patch_size = 256
-patch_stride = patch_size // 2
-lr = 1e-3
+patch_num_per_img = 1
+lr = 1e-4
 resume_path = ''
-save_dir = './resultsUNet'
-train_image_num = 1000
+save_dir = './results/REC/unet'
+train_image_num = None
 milestones = [i * end_epoch // 10 for i in range(4, 10, 2)]
-TRAIN_SOURCE_PATHS_TXT = '/data/datasets/DEBLUR_DIV2K_NONOISE/DIV2K_train_HR_blur.txt'
-TRAIN_TARGET_PATHS_TXT = '/data/datasets/DEBLUR_DIV2K_NONOISE/DIV2K_train_HR_hr.txt'
+source_paths_train_txt = '/data/datasets/TEXT_DEBLUR/blur_train.txt'
+target_paths_train_txt = '/data/datasets/TEXT_DEBLUR/gt_train.txt'
+self_ensemble = False
+fix_img_size = (300, 300)
+extract_random_patch = True
 
-
-patch_size_test = 0
-patch_stride_test = 0
-test_image_num = 20
-save_vis = True
-TEST_SOURCE_PATHS_TXT = '/data/datasets/DEBLUR_DIV2K_NONOISE/DIV2K_valid_HR_blur.txt'
-TEST_TARGET_PATHS_TXT = '/data/datasets/DEBLUR_DIV2K_NONOISE/DIV2K_valid_HR_hr.txt'
-
+patch_size_test = 192
+patch_num_per_img_test = 1
+test_image_num = None
+source_paths_test_txt = '/data/datasets/TEXT_DEBLUR/blur_test.txt'
+target_paths_test_txt = '/data/datasets/TEXT_DEBLUR/gt_test.txt'
+fix_img_size_test = (200, 200)
+extract_random_patch_test = False
 
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 
-source_paths_train, target_paths_train = extract_path_pairs(TRAIN_SOURCE_PATHS_TXT, TRAIN_TARGET_PATHS_TXT, shuffle=True)
-source_paths_test, target_paths_test = extract_path_pairs(TEST_SOURCE_PATHS_TXT, TEST_TARGET_PATHS_TXT, shuffle=True)
+if fix_img_size is not None:
+    torch.backends.cudnn.benchmark = True
+
+source_paths_train, target_paths_train = extract_path_pairs(source_paths_train_txt, target_paths_train_txt, shuffle=True)
+source_paths_test, target_paths_test = extract_path_pairs(source_paths_test_txt, target_paths_test_txt, shuffle=True)
 
 if train_image_num is not None and train_image_num < len(source_paths_train):
     source_paths_train = source_paths_train[:train_image_num]
@@ -81,8 +86,8 @@ if test_image_num is not None and test_image_num < len(source_paths_test):
     source_paths_test = source_paths_test[:test_image_num]
     target_paths_test = target_paths_test[:test_image_num]
 
-dataset_train = REC_DATASET(source_paths_train, target_paths_train, patch_size, patch_stride)
-dataset_test = REC_DATASET(source_paths_test, target_paths_test, patch_size_test, patch_stride_test)
+dataset_train = REC_DATASET(source_paths_train, target_paths_train, patch_size, patch_num_per_img, fix_img_size, extract_random_patch)
+dataset_test = REC_DATASET(source_paths_test, target_paths_test, patch_size_test, patch_num_per_img_test, fix_img_size_test, extract_random_patch_test)
 
 # model = SRNet(in_channels=3, n_features=64)
 model = UNet(in_ch=3, out_ch=3)
@@ -100,7 +105,8 @@ if os.path.exists(resume_path):
 else:
     start_epoch = 1
 
-criterion = torch.nn.MSELoss()
+# criterion = torch.nn.MSELoss()
+criterion = torch.nn.L1Loss()
 
 log_dir = save_dir + '/log'
 if os.path.exists(log_dir):
@@ -121,8 +127,10 @@ for epoch in range(start_epoch, end_epoch + 1):
         source = source.cuda()
         target = target.cuda()
 
-        # source_out = model_rot4_invrot4(source, model)
-        source_out = model(source)
+        if self_ensemble:
+            source_out = self_ensemble_rot4(source, model)
+        else:
+            source_out = model(source)
     
         source_out = torch.clamp(source_out, 0, 1)
         
@@ -156,9 +164,11 @@ for epoch in range(start_epoch, end_epoch + 1):
             source = source.unsqueeze(0).cuda()
             target = target.unsqueeze(0).cuda()
 
-            # source_out = model_rot4_invrot4(source, model)
-            source_out = model(source)
-
+            if self_ensemble:
+                source_out = self_ensemble_rot4(source, model)
+            else:
+                source_out = model(source)
+                
             source_out = torch.clamp(source_out, 0, 1)
 
             test_loss += criterion(source, target).item()
@@ -169,7 +179,7 @@ for epoch in range(start_epoch, end_epoch + 1):
             
             test_psnr += psnr_out
 
-            if save_vis:
+            if i % int(len(dataset_test) * 0.2) == 0:
                 source_ori = np.array(source.squeeze(0).permute(1, 2, 0).cpu())
                 source_out = np.array(source_out.squeeze(0).permute(1, 2, 0).cpu())
                 target = np.array(target.squeeze(0).permute(1, 2, 0).cpu())
