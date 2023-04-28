@@ -1,9 +1,5 @@
 from pathlib import Path
 import os
-import cv2
-import numpy as np
-from tqdm import tqdm
-import shutil
 
 def process(data_root):
     gt_paths_train = [str(i) for i in Path(data_root + '/train').glob('*_orig.png')]

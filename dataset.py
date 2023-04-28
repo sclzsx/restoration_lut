@@ -5,6 +5,7 @@ import torch
 from tqdm import tqdm
 import os
 import numpy as np
+import sys
 
 class REC_DATASET(Dataset):
     def __init__(self, source_paths, target_paths, patch_size, patch_num_per_img, fix_img_size, extract_random_patch, augment):
@@ -19,14 +20,15 @@ class REC_DATASET(Dataset):
                     img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
                 h, w, _ = img.shape
             else:
-                assert os.path.exists(path) == 1
+                if not os.path.exists(path):
+                    print('Image is not existed.', path)
+                    sys.exit()
                 h, w = fix_img_size
-
-            try:
-                assert patch_size < h and patch_size < w
-            except:
-                print('Error in', path, patch_size, h, w, path)
-
+            
+            if not (patch_size < h and patch_size < w):
+                print('patch_size is not suitable.', path, patch_size, h, w, path)
+                sys.exit()
+                
             if patch_num_per_img > 1:
                 if extract_random_patch == 0:
                     for _ in range(patch_num_per_img):
