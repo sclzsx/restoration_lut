@@ -13,23 +13,25 @@ from dataset import REC_DATASET
 from choices import choose_model, choose_loss
 
 ########################################################### hyperparameters 
-end_epoch = 50
-batch_size = 16
-patch_size = 256
-patch_num_per_img = 1
-lr = 1e-5
-resume_path = 'results/text_deblur/unet-l1/max_test_psnr.pt'
-save_dir = './results/text_deblur/unetResume'
+end_epoch = 10
+batch_size = 128
+patch_size = 128
+patch_num_per_img = 4
+lr = 5e-4
+resume_path = 'results/text_deblur/unetResume/max_test_psnr.pt'
+save_dir = './results/text_deblur/unetResume2'
 train_image_num = None
 source_paths_train_txt = '/data/datasets/TEXT_DEBLUR/blur_train.txt'
 target_paths_train_txt = '/data/datasets/TEXT_DEBLUR/gt_train.txt'
 fix_img_size = (300, 300)
 extract_random_patch = True
 augment = True
-print_train_iter_freq = 0.001
+print_train_iter_freq = 0.005
 model_name = 'unet'
 loss_name = 'l1'
 self_ensemble = False
+resume_optim = False
+num_workers = 0
 
 patch_size_test = 192
 patch_num_per_img_test = 1
@@ -40,6 +42,7 @@ fix_img_size_test = (200, 200)
 extract_random_patch_test = False
 augment = False
 vis_test_iter_freq = 0.1
+num_workers_test = 0
 
 ########################################################### prepare 
 
@@ -69,8 +72,8 @@ dataset_test = REC_DATASET(source_paths_test, target_paths_test, patch_size_test
 print('train patches num:', len(dataset_train))
 print('test patches num:', len(dataset_test))
 
-loader_train = DataLoader(dataset=dataset_train, num_workers=4, batch_size=batch_size, shuffle=True)
-loader_test = DataLoader(dataset=dataset_test, num_workers=4, batch_size=batch_size, shuffle=False)
+loader_train = DataLoader(dataset=dataset_train, num_workers=num_workers, batch_size=batch_size, shuffle=True)
+loader_test = DataLoader(dataset=dataset_test, num_workers=num_workers_test, batch_size=batch_size, shuffle=False)
 
 ep_train_iter_num = len(loader_train)
 ep_test_iter_num = len(loader_test)
@@ -89,14 +92,17 @@ if resume_path is not None:
     print('load', resume_path)
     checkpoint = torch.load(resume_path)
     model.load_state_dict(checkpoint['state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer'])
-    lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-    start_epoch = checkpoint['epoch']
 
-    for state in optimizer.state.values():
-        for k, v in state.items():
-            if torch.is_tensor(v):
-                state[k] = v.cuda()
+    if resume_optim:
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+        start_epoch = checkpoint['epoch']
+        for state in optimizer.state.values():
+            for k, v in state.items():
+                if torch.is_tensor(v):
+                    state[k] = v.cuda()
+    else:
+        start_epoch = 1
 
     print('resume from epoch', start_epoch)
 else:
@@ -116,13 +122,16 @@ writer = SummaryWriter(log_dir)
 min_test_loss = 1000
 max_test_psnr = -1000
 model.cuda()
+train_iter_cnt = 1
 
 for epoch in range(start_epoch, end_epoch + 1):
 
     model.train()
-    train_loss = 0
-    for i, (source, target) in enumerate(loader_train):
-        time0 = time.time()
+    ep_train_loss = 0
+    time_pre = time.time()
+    for ep_iter, (source, target) in enumerate(loader_train):
+        ep_iter += 1
+        time_cur = time.time()
 
         source = source.cuda()
         target = target.cuda()
@@ -140,20 +149,29 @@ for epoch in range(start_epoch, end_epoch + 1):
         loss.backward()
         optimizer.step()
 
-        if (i + 1) % print_train_iter_num == 0:
+        loss_value = loss.item()
+
+        if ep_iter % print_train_iter_num == 0:
             psnr_ori = batch_PSNR(source, target, 1.0)
             psnr_out = batch_PSNR(source_out, target, 1.0)
 
-            time1 = time.time()
-            ep_remain_minutes = (time1 - time0) / print_train_iter_num * (ep_train_iter_num - (i + 1)) / 60
+            ep_remain_minutes = ((time_cur - time_pre) / print_train_iter_num) * (ep_train_iter_num - ep_iter) / 60
+            time_pre = time_cur
 
-            print('Epoch:%d, Iter:[%d/%d], loss:%f, psnr_ori:%.3f, psnr_out:%.3f, ep_remain_minutes:%.3f' % (epoch, i + 1, ep_train_iter_num, loss.item(), psnr_ori, psnr_out, ep_remain_minutes))
+            print('Epoch:[%d], Ep_iter:[%d/%d], Train_iter:[%d], loss:%f, psnr_ori:%.3f, psnr_out:%.3f, ep_remain_minutes:%.3f' % (epoch, ep_iter, ep_train_iter_num, train_iter_cnt, loss_value, psnr_ori, psnr_out, ep_remain_minutes))
 
-        train_loss += loss.item()
+            if psnr_out > 0 and psnr_out < 100:
+                writer.add_scalar('train_iter_psnr', psnr_out, train_iter_cnt)
+            writer.add_scalar('train_iter_loss', loss_value, train_iter_cnt)
+            writer.add_scalar('train_iter_lr', optimizer.state_dict()['param_groups'][0]['lr'], train_iter_cnt)
 
-    train_loss /= ep_train_iter_num
-    writer.add_scalar('train_loss_ep', train_loss, epoch)
-    writer.add_scalar('lr', optimizer.state_dict()['param_groups'][0]['lr'], epoch)
+        ep_train_loss += loss_value
+
+        train_iter_cnt += 1
+
+    ep_train_loss /= ep_train_iter_num
+    writer.add_scalar('ep_train_loss', ep_train_loss, epoch)
+    writer.add_scalar('ep_lr', optimizer.state_dict()['param_groups'][0]['lr'], epoch)
 
     ########################################################### eval
     save_img_dir = save_dir + '/save_vis'
