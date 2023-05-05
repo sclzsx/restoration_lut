@@ -11,11 +11,11 @@ save_dir = './demo_out'
 
 model_name = 'unet'
 
-ckpt_path = 'results/text_deblur/unetResume/max_test_psnr.pt'
+ckpt_path = 'results/text_deblur/unetResume2/max_test_psnr.pt'
 
 divide_image_rate = 2
 
-save_tag = '_unet-resume-psnr'
+save_tag = '_unet-resume2-psnr'
 
 ########################################
 
