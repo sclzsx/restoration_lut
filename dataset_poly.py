@@ -8,6 +8,18 @@ import numpy as np
 import sys
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
+from PIL import Image
+
+
+def spatial_deconvolution(img, kernel, alpha, beta):
+    a3 = alpha/2 - beta + 2
+    a2 = 3 * beta - alpha - 6
+    a1 = 5 - 3 * beta + alpha / 2
+    imout = a3 * img
+    imout = cv2.filter2D(imout, -1, kernel) + a2 * img
+    imout = cv2.filter2D(imout, -1, kernel) + a1 * img
+    imout = cv2.filter2D(imout, -1, kernel) + beta * img
+    return np.clip(imout, 0, 1)
 
 class REC_DATASET(Dataset):
     def __init__(self, source_paths, target_paths, patch_size, patch_num_per_img, fix_img_size, extract_random_patch, augment):
@@ -95,8 +107,23 @@ class REC_DATASET(Dataset):
                 np.rot90(source_patch, 1)
                 np.rot90(target_patch, 1)
 
+        psf_path = self.target_paths[image_idx].replace('orig', 'psf')
+        psf = np.array(Image.open(psf_path))
+        psf = psf / np.sum(psf)
+
+        # hist等措施能否让网络收敛得更快？尽管指标提升不了
+        # 实验1：已知psf，粗步deconv，再用小网络细化结果。后面再验证psf的准确性对结果的影响。相当与DL的non-blind算法
+        # 实验2：估计粗略的psf，当作预处理，再先deconv后用小网络细化结果。或者直接套入一个小型non-blind网络，即网络学习到的是对deconv的细化
+        # 实验3：小网络仅用于预测psf，采用deonv与L1结合的新损失函数优化网络，相当于网络学习到的是estimation。像是PSNRLoss，目的使预测时的psnr更高
+        # 应该多看最新的non-blind的方法
+
+        source_patch = 255 - source_patch
+        target_patch = 255 - target_patch
+
         source_patch = source_patch / 255.0
         target_patch = target_patch / 255.0
+
+        source_patch = spatial_deconvolution(source_patch, psf, 6, 1)
 
         source_patch = torch.from_numpy(source_patch).permute(2, 0, 1).float()
         target_patch = torch.from_numpy(target_patch).permute(2, 0, 1).float()
@@ -139,20 +166,20 @@ if __name__ == '__main__':
     criterion = torch.nn.L1Loss()
 
     for i, (source_tensor, target_tensor) in enumerate(loader_test):
-        print(source_tensor.shape, target_tensor.shape, torch.min(source_tensor), torch.max(source_tensor))
+        # print(source_tensor.shape, target_tensor.shape, torch.min(source_tensor), torch.max(source_tensor))
 
         source_tensor, target_tensor = source_tensor.cuda(), target_tensor.cuda()
 
         loss = criterion(source_tensor, target_tensor)
 
-        print(loss.shape, type(loss), loss.dtype, loss.requires_grad, loss.item())
+        # print(loss.shape, type(loss), loss.dtype, loss.requires_grad, loss.item())
 
         source_b = (np.array(source_tensor[0,0,:,:].cpu()) * 255).astype('uint8')
         target_b = (np.array(target_tensor[0,0,:,:].cpu()) * 255).astype('uint8')
 
         plt.figure()
         plt.subplot(1, 2, 1)
-        plt.imshow(255 - source_b)
+        plt.imshow(source_b)
         plt.subplot(1, 2, 2)
-        plt.imshow(255 - target_b)
-        plt.savefig('tmp/' + str(i) + '.png')
+        plt.imshow(target_b)
+        plt.savefig('tmp/' + str(i) + '_deconv.png')

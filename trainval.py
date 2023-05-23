@@ -8,18 +8,25 @@ import cv2
 import sys
 import time
 
-from tools import self_ensemble_rot4, batch_PSNR, extract_path_pairs
-from dataset import REC_DATASET
+from tools import self_ensemble_rot4, batch_PSNR
 from choices import choose_model, choose_loss
 
+# from dataset import REC_DATASET, extract_path_pairs
+# from dataset_hist import REC_DATASET, extract_path_pairs
+from dataset_poly import REC_DATASET, extract_path_pairs
+
 ########################################################### hyperparameters 
-end_epoch = 10
-batch_size = 128
-patch_size = 128
-patch_num_per_img = 4
+end_epoch = 50
+batch_size = 8
+patch_size = 256
+patch_num_per_img = 1
 lr = 5e-4
-resume_path = 'results/text_deblur/unetResume/max_test_psnr.pt'
-save_dir = './results/text_deblur/unetResume2'
+resume_path = None
+save_dir = './results/TextDeblur/UnetTinyPoly'
+model_name = 'UnetTiny'
+loss_name = 'l1'
+num_workers = 4
+
 train_image_num = None
 source_paths_train_txt = '/data/datasets/TEXT_DEBLUR/blur_train.txt'
 target_paths_train_txt = '/data/datasets/TEXT_DEBLUR/gt_train.txt'
@@ -27,11 +34,8 @@ fix_img_size = (300, 300)
 extract_random_patch = True
 augment = True
 print_train_iter_freq = 0.005
-model_name = 'unet'
-loss_name = 'l1'
 self_ensemble = False
 resume_optim = False
-num_workers = 0
 
 patch_size_test = 192
 patch_num_per_img_test = 1
@@ -103,7 +107,6 @@ if resume_path is not None:
                     state[k] = v.cuda()
     else:
         start_epoch = 1
-
     print('resume from epoch', start_epoch)
 else:
     if os.path.exists(save_dir):
@@ -118,6 +121,8 @@ log_dir = save_dir + '/log'
 if os.path.exists(log_dir):
     shutil.rmtree(log_dir)
 writer = SummaryWriter(log_dir)
+
+shutil.copyfile('./trainval.py', save_dir + '/trainval.py.bk')
 
 min_test_loss = 1000
 max_test_psnr = -1000
@@ -141,7 +146,7 @@ for epoch in range(start_epoch, end_epoch + 1):
         else:
             source_out = model(source)
     
-        source_out = torch.clamp(source_out, 0, 1)
+        # source_out = torch.clamp(source_out, 0, 1) # 此时是否能够截断？
         
         loss = criterion(source_out, target)
 
