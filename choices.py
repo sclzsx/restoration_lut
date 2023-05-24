@@ -19,6 +19,7 @@ def choose_model(model_name):
         print('unknown model name.')
     return model
 
+
 def choose_loss(loss_name):
     if loss_name == 'l1':
         criterion = torch.nn.L1Loss()

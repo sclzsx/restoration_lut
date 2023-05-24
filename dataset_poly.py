@@ -12,7 +12,7 @@ from PIL import Image
 
 
 def spatial_deconvolution(img, kernel, alpha, beta):
-    a3 = alpha/2 - beta + 2
+    a3 = alpha / 2 - beta + 2
     a2 = 3 * beta - alpha - 6
     a1 = 5 - 3 * beta + alpha / 2
     imout = a3 * img
@@ -21,13 +21,15 @@ def spatial_deconvolution(img, kernel, alpha, beta):
     imout = cv2.filter2D(imout, -1, kernel) + beta * img
     return np.clip(imout, 0, 1)
 
+
 class REC_DATASET(Dataset):
-    def __init__(self, source_paths, target_paths, patch_size, patch_num_per_img, fix_img_size, extract_random_patch, augment):
+    def __init__(self, source_paths, target_paths, patch_size, patch_num_per_img, fix_img_size, extract_random_patch,
+                 augment):
         super(REC_DATASET, self).__init__()
         patches_info = []
         image_idx = 0
         for path in tqdm(source_paths):
-            
+
             if fix_img_size is None:
                 img = cv2.imread(path)
                 if len(img.shape) == 2:
@@ -38,11 +40,11 @@ class REC_DATASET(Dataset):
                     print('Image is not existed.', path)
                     sys.exit()
                 h, w = fix_img_size
-            
+
             if not (patch_size < h and patch_size < w):
                 print('patch_size is not suitable.', path, patch_size, h, w, path)
                 sys.exit()
-                
+
             if patch_num_per_img > 1:
                 if extract_random_patch == 0:
                     for _ in range(patch_num_per_img):
@@ -130,6 +132,7 @@ class REC_DATASET(Dataset):
 
         return source_patch, target_patch
 
+
 def extract_path_pairs(source_paths_txt, target_paths_txt, shuffle=False):
     with open(source_paths_txt, 'r') as f:
         lines = f.readlines()
@@ -151,7 +154,8 @@ def extract_path_pairs(source_paths_txt, target_paths_txt, shuffle=False):
 if __name__ == '__main__':
     source_paths_test_txt = '/data/datasets/TEXT_DEBLUR/blur_test.txt'
     target_paths_test_txt = '/data/datasets/TEXT_DEBLUR/gt_test.txt'
-    source_paths_test, target_paths_test = extract_path_pairs(source_paths_test_txt, target_paths_test_txt, shuffle=False)
+    source_paths_test, target_paths_test = extract_path_pairs(source_paths_test_txt, target_paths_test_txt,
+                                                              shuffle=False)
     print('dataset test images num:', len(source_paths_test))
 
     patch_size_test = 192
@@ -160,7 +164,8 @@ if __name__ == '__main__':
     extract_random_patch_test = False
     augment = True
 
-    dataset_test = REC_DATASET(source_paths_test, target_paths_test, patch_size_test, patch_num_per_img_test, fix_img_size_test, extract_random_patch_test, augment)
+    dataset_test = REC_DATASET(source_paths_test, target_paths_test, patch_size_test, patch_num_per_img_test,
+                               fix_img_size_test, extract_random_patch_test, augment)
     loader_test = DataLoader(dataset=dataset_test, num_workers=0, batch_size=8, shuffle=False)
 
     criterion = torch.nn.L1Loss()
@@ -174,8 +179,8 @@ if __name__ == '__main__':
 
         # print(loss.shape, type(loss), loss.dtype, loss.requires_grad, loss.item())
 
-        source_b = (np.array(source_tensor[0,0,:,:].cpu()) * 255).astype('uint8')
-        target_b = (np.array(target_tensor[0,0,:,:].cpu()) * 255).astype('uint8')
+        source_b = (np.array(source_tensor[0, 0, :, :].cpu()) * 255).astype('uint8')
+        target_b = (np.array(target_tensor[0, 0, :, :].cpu()) * 255).astype('uint8')
 
         plt.figure()
         plt.subplot(1, 2, 1)

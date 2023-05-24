@@ -29,7 +29,7 @@ augment = False
 vis_test_iter_freq = 0.1
 num_workers_test = 0
 
-batch_size_test = 1 # 大于1可能测得不准bug
+batch_size_test = 1  # 大于1可能测得不准bug
 self_ensemble_test = False
 
 ########################################################### prepare 
@@ -48,14 +48,14 @@ if test_image_num is not None and test_image_num < len(source_paths_test):
     target_paths_test = target_paths_test[:test_image_num]
 print('selected test images num:', len(source_paths_test))
 
-dataset_test = REC_DATASET(source_paths_test, target_paths_test, patch_size_test, patch_num_per_img_test, fix_img_size_test, extract_random_patch_test, augment)
+dataset_test = REC_DATASET(source_paths_test, target_paths_test, patch_size_test, patch_num_per_img_test,
+                           fix_img_size_test, extract_random_patch_test, augment)
 print('test patches num:', len(dataset_test))
 
 loader_test = DataLoader(dataset=dataset_test, num_workers=num_workers_test, batch_size=batch_size_test, shuffle=False)
 
 ep_test_iter_num = len(loader_test)
 vis_test_iter_num = max(int(vis_test_iter_freq * ep_test_iter_num), 1)
-
 
 if ckpt_path is not None:
     if not os.path.exists(ckpt_path):
@@ -86,7 +86,7 @@ for i, (source, target) in enumerate(loader_test):
             source_out = self_ensemble_rot4(source, model)
         else:
             source_out = model(source)
-        
+
     source_out = torch.clamp(source_out, 0, 1)
 
     psnr_ori = batch_PSNR(source, target, 1.0)
@@ -100,9 +100,9 @@ for i, (source, target) in enumerate(loader_test):
     test_ssim += ssim_out
 
     if (i + 1) % vis_test_iter_num == 0:
-        source_ori = np.array(source[0,:,:,:].permute(1, 2, 0).cpu())
-        source_out = np.array(source_out[0,:,:,:].permute(1, 2, 0).cpu())
-        target = np.array(target[0,:,:,:].permute(1, 2, 0).cpu())
+        source_ori = np.array(source[0, :, :, :].permute(1, 2, 0).cpu())
+        source_out = np.array(source_out[0, :, :, :].permute(1, 2, 0).cpu())
+        target = np.array(target[0, :, :, :].permute(1, 2, 0).cpu())
 
         source_ori = (source_ori * 255).astype('uint8')
         source_out = (source_out * 255).astype('uint8')
